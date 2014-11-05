@@ -1,0 +1,5 @@
+[run]
+source = trytond.modules.nereid_webshop_elastic_search
+
+[report]
+omit = */tests/*, */setup.py
