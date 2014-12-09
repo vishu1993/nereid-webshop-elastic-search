@@ -7,11 +7,13 @@
 """
 from trytond.pool import Pool
 from product import Product, Template
+from website import Website
 
 
 def register():
     Pool.register(
         Product,
         Template,
+        Website,
         module='nereid_webshop_elastic_search', type_='model'
     )
