@@ -438,6 +438,23 @@ class TestProduct(NereidTestCase):
 
                 self.clear_server()
 
+    def test_0030_autocomplete(self):
+        """
+        Tests the custom autocomplete classmethod
+        """
+        with Transaction().start(DB_NAME, USER, context=CONTEXT):
+            self.setup_defaults()
+            self.create_products()
+            self.IndexBacklog.update_index()
+            time.sleep(2)
+
+            results = self.NereidWebsite.auto_complete('product')
+
+            self.assertIn({'value': 'Product 1'}, results)
+            self.assertIn({'value': 'Product 2'}, results)
+
+            self.clear_server()
+
 
 def suite():
     """
