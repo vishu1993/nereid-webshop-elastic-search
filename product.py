@@ -138,15 +138,14 @@ class Product:
 
         if not results:
             logger.info(
-                "Search for {0} yielded no results from elasticsearch."
-                .format(phrase)
+                "Search for %s yielded no results from elasticsearch." % phrase
             )
             logger.info("Falling back to parent quick_search.")
             return super(Product, cls).quick_search()
 
         logger.info(
-            "Search for {0} yielded in {1} results."
-            .format(phrase, len(results))
+            "Search for %s yielded in %d results." %
+            (phrase, len(results))
         )
 
         products = Pagination(cls, [
@@ -162,7 +161,7 @@ class Product:
         """
         results = []
         for product in cls.search_on_elastic_search(phrase, limit=limit):
-            results.append({"value": "{0}".format(product.name)})
+            results.append({"value": product.name})
 
         return results
 
