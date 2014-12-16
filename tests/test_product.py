@@ -75,9 +75,9 @@ class TestProduct(NereidTestCase):
         }])
         uom, = self.Uom.search([('symbol', '=', 'u')])
 
-        template1, template2 = self.ProductTemplate.create([
+        self.template1, self.template2 = self.ProductTemplate.create([
             {
-                'name': 'Product 1',
+                'name': 'Prøduçt 1 ünîçø∂e',
                 'type': 'goods',
                 'category': category.id,
                 'default_uom': uom.id,
@@ -98,13 +98,13 @@ class TestProduct(NereidTestCase):
 
         return self.Product.create([
             {
-                'template': template1,
+                'template': self.template1,
                 'code': 'code1',
                 'displayed_on_eshop': True,
                 'uri': 'prod1',
             },
             {
-                'template': template2,
+                'template': self.template2,
                 'code': 'code of product 2',
                 'displayed_on_eshop': True,
                 'uri': 'prod2',
@@ -425,12 +425,11 @@ class TestProduct(NereidTestCase):
 
             with app.test_client() as c:
                 rv = c.get('/search?q=product')
-                self.assertIn('Product 1', rv.data)
-                self.assertIn('Product 2', rv.data)
+                self.assertIn(self.template2.name, rv.data)
 
-                rv = c.get('/search?q=product 1')
-                self.assertIn('Product 1', rv.data)
-                self.assertNotIn('Product 2', rv.data)
+                rv = c.get('/search?q=prøduçt 1 ünîçø∂e')
+                self.assertTrue(self.template1.name in rv.data.decode('UTF-8'))
+                self.assertNotIn(self.template2.name, rv.data.decode('UTF-8'))
 
                 # Too partial
                 rv = c.get('/search?q=this is')
@@ -450,8 +449,8 @@ class TestProduct(NereidTestCase):
 
             results = self.NereidWebsite.auto_complete('product')
 
-            self.assertIn({'value': 'Product 1'}, results)
-            self.assertIn({'value': 'Product 2'}, results)
+            self.assertIn({'value': self.template1.name}, results)
+            self.assertIn({'value': self.template2.name}, results)
 
             self.clear_server()
 
