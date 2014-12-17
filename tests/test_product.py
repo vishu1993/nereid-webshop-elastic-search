@@ -75,26 +75,65 @@ class TestProduct(NereidTestCase):
         }])
         uom, = self.Uom.search([('symbol', '=', 'u')])
 
-        self.template1, self.template2 = self.ProductTemplate.create([
-            {
-                'name': 'Prøduçt 1 ünîçø∂e',
-                'type': 'goods',
-                'category': category.id,
-                'default_uom': uom.id,
-                'description': 'This is product 1',
-                'list_price': 5000,
-                'cost_price': 4000,
-            },
-            {
-                'name': 'Product 2',
-                'type': 'goods',
-                'category': category.id,
-                'default_uom': uom.id,
-                'description': 'This is product 2',
-                'list_price': 3000,
-                'cost_price': 2000,
-            }
-        ])
+        self.template1, self.template2, self.template3, self.template4, \
+            self.template5, self.template6 = \
+            self.ProductTemplate.create([
+                {
+                    'name': 'Prøduçt 1 ünîçø∂e',
+                    'type': 'goods',
+                    'category': category.id,
+                    'default_uom': uom.id,
+                    'description': 'This is product 1',
+                    'list_price': 5000,
+                    'cost_price': 4000,
+                },
+                {
+                    'name': 'Product 2',
+                    'type': 'goods',
+                    'category': category.id,
+                    'default_uom': uom.id,
+                    'description': 'This is product 2',
+                    'list_price': 3000,
+                    'cost_price': 2000,
+                },
+                {
+                    'name': 'ActiveProduct',
+                    'type': 'goods',
+                    'category': category.id,
+                    'default_uom': uom.id,
+                    'description':
+                        'This is product for active testing',
+                    'list_price': 3000,
+                    'cost_price': 2000,
+                },
+                {
+                    'name': 'DisplayProduct',
+                    'type': 'goods',
+                    'category': category.id,
+                    'default_uom': uom.id,
+                    'description': 'This is product for e-shop display testing',
+                    'list_price': 3000,
+                    'cost_price': 2000,
+                },
+                {
+                    'name': 'InactiveProduct',
+                    'type': 'goods',
+                    'category': category.id,
+                    'default_uom': uom.id,
+                    'description': 'This is product for inactive testing',
+                    'list_price': 3000,
+                    'cost_price': 2000,
+                },
+                {
+                    'name': 'NotDisplayProduct',
+                    'type': 'goods',
+                    'category': category.id,
+                    'default_uom': uom.id,
+                    'description': 'This is product for non-display testing',
+                    'list_price': 3000,
+                    'cost_price': 2000,
+                },
+            ])
 
         return self.Product.create([
             {
@@ -108,7 +147,32 @@ class TestProduct(NereidTestCase):
                 'code': 'code of product 2',
                 'displayed_on_eshop': True,
                 'uri': 'prod2',
-            }
+            },
+            {
+                'template': self.template3,
+                'code': 'code of activeproduct',
+                'displayed_on_eshop': True,
+                'uri': 'activeprod',
+            },
+            {
+                'template': self.template4,
+                'code': 'code of displayproduct',
+                'displayed_on_eshop': True,
+                'uri': 'displayprod',
+            },
+            {
+                'template': self.template5,
+                'code': 'code of inactiveproduct',
+                'active': False,
+                'displayed_on_eshop': True,
+                'uri': 'inactiveprod',
+            },
+            {
+                'template': self.template6,
+                'code': 'code of notdisplayproduct',
+                'displayed_on_eshop': False,
+                'uri': 'notdisplayprod',
+            },
         ])
 
     def _create_fiscal_year(self, date=None, company=None):
@@ -401,8 +465,8 @@ class TestProduct(NereidTestCase):
             })
             self.assertEqual(self.IndexBacklog.search([], count=True), 1)
 
-            # Create two new products
-            product1, product2 = self.create_products()
+            # Create new products
+            self.create_products()
 
             # Update index on Elastic-Search server
             self.IndexBacklog.update_index()
@@ -425,7 +489,7 @@ class TestProduct(NereidTestCase):
 
             with app.test_client() as c:
                 rv = c.get('/search?q=product')
-                self.assertIn(self.template2.name, rv.data)
+                self.assertIn(self.template2.name, rv.data.decode('UTF-8'))
 
                 rv = c.get('/search?q=prøduçt 1 ünîçø∂e')
                 self.assertTrue(self.template1.name in rv.data.decode('UTF-8'))
@@ -433,7 +497,7 @@ class TestProduct(NereidTestCase):
 
                 # Too partial
                 rv = c.get('/search?q=this is')
-                self.assertNotIn('Product', rv.data)
+                self.assertNotIn('Product', rv.data.decode('UTF-8'))
 
                 self.clear_server()
 
@@ -451,6 +515,32 @@ class TestProduct(NereidTestCase):
 
             self.assertIn({'value': self.template1.name}, results)
             self.assertIn({'value': self.template2.name}, results)
+
+            self.clear_server()
+
+    def test_0035_product_active_eshop(self):
+        """
+        Tests for active/inactive and e-shop displayed/hidden products.
+        """
+        with Transaction().start(DB_NAME, USER, context=CONTEXT):
+            self.setup_defaults()
+            self.create_products()
+            self.IndexBacklog.update_index()
+            time.sleep(2)
+            app = self.get_app()
+
+            with app.test_client() as c:
+                rv = c.get('/search?q=active')
+                self.assertIn('Active', rv.data.decode('UTF-8'))
+
+                rv = c.get('/search?q=inactive')
+                self.assertNotIn('Inactive', rv.data.decode('UTF-8'))
+
+                rv = c.get('/search?q=display')
+                self.assertIn('Display', rv.data.decode('UTF-8'))
+
+                rv = c.get('/search?q=notdisplay')
+                self.assertNotIn('NotDisplay', rv.data.decode('UTF-8'))
 
             self.clear_server()
 
