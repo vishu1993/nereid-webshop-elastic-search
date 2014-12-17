@@ -62,7 +62,10 @@ class Product:
                     'sequence': node.sequence
                 } for node in self.nodes
             ],
-            'displayed_on_eshop': self.displayed_on_eshop
+            'displayed_on_eshop': (
+                "true" if self.displayed_on_eshop else "false"
+            ),
+            'active': "true" if self.active else "false",
         }
 
     @classmethod
@@ -89,6 +92,14 @@ class Product:
                 ),
                 MatchQuery(
                     'description', search_phrase, boost=0.5
+                ),
+            ],
+            must=[
+                MatchQuery(
+                    'active', "true"
+                ),
+                MatchQuery(
+                    'displayed_on_eshop', "true"
                 ),
             ]
         )
