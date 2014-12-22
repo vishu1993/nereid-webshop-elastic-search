@@ -26,6 +26,15 @@
                           },
                           "type": "string",
                           "analyzer": "full_name"
+                      },
+                      "tree_nodes":
+                      {
+                          "type": "nested",
+                          "properties": {
+                              "id": {"type": "long"},
+                              "name": {"type": "string"},
+                              "sequence": {"type": "long"}
+                          }
                       }
                   }
               }
