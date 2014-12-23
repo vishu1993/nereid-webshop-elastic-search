@@ -9,7 +9,7 @@ from trytond.pool import Pool, PoolMeta
 from trytond.transaction import Transaction
 from nereid import route, request, render_template
 from nereid.contrib.pagination import Pagination
-from pyes import BoolQuery, MatchQuery
+from pyes import BoolQuery, MatchQuery, NestedQuery
 
 __metaclass__ = PoolMeta
 __all__ = ['Product', 'Template']
@@ -43,6 +43,7 @@ class Product:
                     self.default_uom
                 )
             })
+
         return {
             'id': self.id,
             'name': self.name,
@@ -53,15 +54,13 @@ class Product:
                 'id': self.category.id,
                 'name': self.category.name,
             } if self.category else {},
+            'tree_nodes': [{
+                'id': node.id,
+                'name': node.node.name,
+                'sequence': node.sequence,
+            } for node in self.nodes],
             'type': self.type,
             'price_lists': price_list_data,
-            'tree_nodes': [
-                {
-                    'id': node.id,
-                    'name': node.node.name,
-                    'sequence': node.sequence
-                } for node in self.nodes
-            ],
             'displayed_on_eshop': (
                 "true" if self.displayed_on_eshop else "false"
             ),
@@ -79,10 +78,10 @@ class Product:
         return BoolQuery(
             should=[
                 MatchQuery(
-                    'code', search_phrase
+                    'code', search_phrase, boost=1.5
                 ),
                 MatchQuery(
-                    'name', search_phrase
+                    'name', search_phrase, boost=2
                 ),
                 MatchQuery(
                     'name.partial', search_phrase
@@ -92,6 +91,19 @@ class Product:
                 ),
                 MatchQuery(
                     'description', search_phrase, boost=0.5
+                ),
+                MatchQuery(
+                    'category.name', search_phrase
+                ),
+                NestedQuery(
+                    'tree_nodes', BoolQuery(
+                        should=[
+                            MatchQuery(
+                                'tree_nodes.name',
+                                search_phrase
+                            ),
+                        ]
+                    )
                 ),
             ],
             must=[
