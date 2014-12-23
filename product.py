@@ -66,7 +66,17 @@ class Product:
                 "true" if self.displayed_on_eshop else "false"
             ),
             'active': "true" if self.active else "false",
+            'attributes': self.get_elastic_filterable_data(),
         }
+
+    def get_elastic_filterable_data(self):
+        """
+        This method returns a dictionary of attributes which will be used to
+        filter search results. By default, it returns a product's attributes.
+        Downstream modules can override this method to add any other relevant
+        fields.
+        """
+        return self.attributes
 
     @classmethod
     def get_elastic_search_query(cls, search_phrase):
