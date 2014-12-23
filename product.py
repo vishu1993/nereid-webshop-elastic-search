@@ -7,6 +7,7 @@
 """
 from trytond.pool import Pool, PoolMeta
 from trytond.transaction import Transaction
+from trytond.model import fields
 from nereid import route, request, render_template
 from nereid.contrib.pagination import Pagination
 from pyes import BoolQuery, MatchQuery, NestedQuery
@@ -223,3 +224,12 @@ class Template:
             products.extend([Product(p) for p in template.products])
         IndexBacklog.create_from_records(products)
         return rv
+
+
+class ProductAttribute:
+    __name__ = 'product.attribute'
+    filterable = fields.Boolean('Filterable')
+
+    @staticmethod
+    def default_filterable():
+        return True
