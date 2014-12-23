@@ -1,6 +1,16 @@
 <?xml version="1.0"?>
 <tryton>
     <data>
+        <record model="ir.ui.view" id="attribute_view_list">
+            <field name="model">product.attribute</field>
+            <field name="inherit" ref="product_attribute.attribute_view_list" />
+            <field name="name">attribute_list</field>
+        </record>
+        <record model="ir.ui.view" id="attribute_view_form">
+            <field name="model">product.attribute</field>
+            <field name="inherit" ref="product_attribute.attribute_view_form" />
+            <field name="name">attribute_form</field>
+        </record>
         <!-- Create a document for mapping products -->
         <record model="elasticsearch.document.type" id="es_product_document">
             <field name="name">Products</field>
