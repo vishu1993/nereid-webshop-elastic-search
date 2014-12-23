@@ -11,6 +11,7 @@ import datetime
 from dateutil.relativedelta import relativedelta
 from decimal import Decimal
 from pyes.managers import Indices
+from pyes import BoolQuery, MatchQuery
 
 import trytond.tests.test_tryton
 from trytond.tests.test_tryton import POOL, USER, DB_NAME, CONTEXT
@@ -58,6 +59,8 @@ class TestProduct(NereidTestCase):
         self.Node = POOL.get('product.tree_node')
         self.ElasticConfig = POOL.get('elasticsearch.configuration')
         self.ElasticDocumentType = POOL.get('elasticsearch.document.type')
+        self.ProductAttribute = POOL.get('product.attribute')
+        self.ProductAttributeSet = POOL.get('product.attribute.set')
 
         self.templates = {
             'search-results.jinja': '''
@@ -561,6 +564,99 @@ class TestProduct(NereidTestCase):
                 self.assertTrue(
                     self.template1.name in rv.data.decode('UTF-8')
                 )
+
+            self.clear_server()
+
+    def test_0045_product_attributes_indexing(self):
+        """
+        Test that product attributes are being indexed
+        """
+        with Transaction().start(DB_NAME, USER, context=CONTEXT):
+            self.update_treenode_mapping()
+            self.setup_defaults()
+
+            uom, = self.Uom.search([], limit=1)
+
+            # Create attributes
+            attribute1, = self.ProductAttribute.create([{
+                'name': 'size',
+                'type_': 'selection',
+                'string': 'Size',
+                'selection': 'm: M\nl:L\nxl:XL'
+            }])
+            attribute2, = self.ProductAttribute.create([{
+                'name': 'color',
+                'type_': 'selection',
+                'string': 'Color',
+                'selection': 'blue: Blue\nblack:Black'
+            }])
+            attribute3, = self.ProductAttribute.create([{
+                'name': 'attrib',
+                'type_': 'char',
+                'string': 'Attrib',
+            }])
+            attribute4, = self.ProductAttribute.create([{
+                'name': 'ø',
+                'type_': 'char',
+                'string': 'ø',
+            }])
+
+            # Create attribute set
+            attrib_set, = self.ProductAttributeSet.create([{
+                'name': 'Cloth',
+                'attributes': [
+                    ('add', [attribute1.id, attribute2.id, attribute4.id])
+                ]
+            }])
+
+            # Create product template with attribute set
+            template1, = self.ProductTemplate.create([{
+                'name': 'This is Product',
+                'type': 'goods',
+                'list_price': Decimal('10'),
+                'cost_price': Decimal('5'),
+                'default_uom': uom.id,
+                'attribute_set': attrib_set.id,
+            }])
+
+            product1, = self.Product.create([{
+                'template': template1.id,
+                'displayed_on_eshop': True,
+                'uri': 'uri3',
+                'code': 'SomeProductCode',
+                'attributes': {
+                    'color': 'blue',
+                    'size': 'L',
+                    'ø': 'something'
+                }
+            }])
+
+            self.assertEqual(self.IndexBacklog.search([], count=True), 1)
+
+            self.IndexBacklog.update_index()
+            time.sleep(2)
+
+            self.assertEqual(self.IndexBacklog.search([], count=True), 0)
+
+            # Try a simple query on the basis of product attributes.
+            conn = self.ElasticConfig(1).get_es_connection()
+
+            results = [
+                r.name for r in
+                conn.search(
+                    BoolQuery(
+                        should=[
+                            MatchQuery('attributes.color', 'blue')
+                        ]
+                    ),
+                    doc_types=[
+                        self.ElasticConfig(1).make_type_name('product.product')
+                    ],
+                    size=10
+                )
+            ]
+
+            self.assertTrue(product1.name in results)
 
             self.clear_server()
 
