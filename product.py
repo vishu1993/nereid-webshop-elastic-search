@@ -74,9 +74,38 @@ class Product:
         This method returns a dictionary of attributes which will be used to
         filter search results. By default, it returns a product's attributes.
         Downstream modules can override this method to add any other relevant
-        fields.
+        fields. This data is added to the index.
         """
         return self.attributes
+
+    @classmethod
+    def get_filterable_attributes(cls):
+        """
+        This method returns a list of filterable product attributes, which can
+        be used in faceting and aggregation. Downstream modules can override
+        this method to add any extra filterable fields.
+        """
+        Attribute = Pool().get('product.attribute')
+
+        return [
+            x.name for x in Attribute.search([('filterable', '=', True)])
+        ]
+
+    @classmethod
+    def add_faceting_to_query(cls, query):
+        """
+        This method wraps the query by a `~pyes.query.Search` object, and then
+        adds appropriate terms to the `facet` attribute of this object. By
+        default, term facets are generated over filterable attributes.
+        """
+        filterable_attributes = cls.get_filterable_attributes()
+
+        search_query = query.search()
+
+        for attribute in filterable_attributes:
+            search_query.facet.add_term_facet(attribute)
+
+        return search_query
 
     @classmethod
     def get_elastic_search_query(cls, search_phrase):
@@ -135,20 +164,39 @@ class Product:
         TODO:
 
             * Add support for sorting
-            * Add support for filtering
             * Add support for aggregates
+
+        This method passes a query, alongwith term facets, to the search method
+        for processing. For example, if one has a `~pyes.query.BoolQuery`
+        object, and the product has attributes 'color' and 'size', one may pass
+        them as terms as follows -:
+
+        >>> query.facet.add_term_facet('color')
+        >>> query.facet.add_term_facet('size')
+
+        The resultset is then obtained and relevant data can be retrieved.
+
+        >>> result_set = conn.search(query, **kwargs)
+        >>> print result_set.facets['color']['terms']
+        [
+            {'count': 1, 'term': 'blue'},
+            {'count': 2, 'term': 'black'},
+            ...
+        ]
 
         :param search_phrase: Searches for this particular phrase
         :param limit: The number of records to be returned
-        :returns: List of dictionaries which contain each product's attributes
+        :returns: `~pyes.es.ResultSet` object which contains each product's
+        attributes
         """
         config = Pool().get('elasticsearch.configuration')(1)
 
         conn = config.get_es_connection(timeout=5)
         query = cls.get_elastic_search_query(search_phrase)
+        faceted_query = cls.add_faceting_to_query(query)
 
         return conn.search(
-            query,
+            faceted_query,
             doc_types=[config.make_type_name('product.product')],
             size=limit
         )
@@ -165,9 +213,11 @@ class Product:
 
         logger = Pool().get('elasticsearch.configuration').get_logger()
 
+        result_set = cls.search_on_elastic_search(phrase)
+
         results = [
             r.id for r in
-            cls.search_on_elastic_search(phrase)
+            result_set
         ]
 
         if not results:
