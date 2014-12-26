@@ -10,6 +10,8 @@ import time
 import datetime
 from dateutil.relativedelta import relativedelta
 from decimal import Decimal
+from pyes.managers import Indices
+from pyes import BoolQuery, MatchQuery
 
 import trytond.tests.test_tryton
 from trytond.tests.test_tryton import POOL, USER, DB_NAME, CONTEXT
@@ -56,6 +58,9 @@ class TestProduct(NereidTestCase):
         self.Locale = POOL.get('nereid.website.locale')
         self.Node = POOL.get('product.tree_node')
         self.ElasticConfig = POOL.get('elasticsearch.configuration')
+        self.ElasticDocumentType = POOL.get('elasticsearch.document.type')
+        self.ProductAttribute = POOL.get('product.attribute')
+        self.ProductAttributeSet = POOL.get('product.attribute.set')
 
         self.templates = {
             'search-results.jinja': '''
@@ -423,16 +428,26 @@ class TestProduct(NereidTestCase):
         """
         Clear the elasticsearch server.
         """
-        self.Product.delete(self.Product.search([]))
-        self.IndexBacklog.update_index()
-        time.sleep(2)
+        conn = self.ElasticConfig(1).get_es_connection()
+        index_name = self.ElasticConfig(1).get_index_name(name=None)
+
+        indices = Indices(conn)
+        indices.delete_index_if_exists(index_name)
+
+    def update_treenode_mapping(self):
+        """
+        Update tree_nodes mapping as nested.
+        """
+        product_doc, = self.ElasticDocumentType.search([])
+        self.ElasticConfig.update_settings([self.ElasticConfig(1)])
+        self.ElasticDocumentType.update_mapping([product_doc])
 
     def test_0010_test_product_indexing(self):
         """
         Tests indexing on creation and updation of product
         """
         with Transaction().start(DB_NAME, USER, context=CONTEXT):
-
+            self.update_treenode_mapping()
             self.setup_defaults()
 
             category_automobile, = self.ProductCategory.create([{
@@ -473,43 +488,21 @@ class TestProduct(NereidTestCase):
             time.sleep(2)
 
             # Test if new records have been uploaded on elastic server
-            # If Index Backlog if empty, it means the records have been updated
+            # If Index Backlog if empty, it means the records got updated
             self.assertEqual(self.IndexBacklog.search([], count=True), 0)
 
             self.clear_server()
 
-    def test_0020_search(self):
-        """
-        Tests product search via elastic search
-        """
-        with Transaction().start(DB_NAME, USER, context=CONTEXT):
-            self.setup_defaults()
-            self.create_products()
-            app = self.get_app()
-
-            with app.test_client() as c:
-                rv = c.get('/search?q=product')
-                self.assertIn(self.template2.name, rv.data.decode('UTF-8'))
-
-                rv = c.get('/search?q=prøduçt 1 ünîçø∂e')
-                self.assertTrue(self.template1.name in rv.data.decode('UTF-8'))
-                self.assertNotIn(self.template2.name, rv.data.decode('UTF-8'))
-
-                # Too partial
-                rv = c.get('/search?q=this is')
-                self.assertNotIn('Product', rv.data.decode('UTF-8'))
-
-                self.clear_server()
-
-    def test_0030_autocomplete(self):
+    def test_0020_autocomplete(self):
         """
         Tests the custom autocomplete classmethod
         """
         with Transaction().start(DB_NAME, USER, context=CONTEXT):
+            self.update_treenode_mapping()
             self.setup_defaults()
             self.create_products()
             self.IndexBacklog.update_index()
-            time.sleep(2)
+            time.sleep(5)
 
             results = self.NereidWebsite.auto_complete('product')
 
@@ -518,15 +511,16 @@ class TestProduct(NereidTestCase):
 
             self.clear_server()
 
-    def test_0035_product_active_eshop(self):
+    def test_0030_product_active_eshop(self):
         """
         Tests for active/inactive and e-shop displayed/hidden products.
         """
         with Transaction().start(DB_NAME, USER, context=CONTEXT):
+            self.update_treenode_mapping()
             self.setup_defaults()
             self.create_products()
             self.IndexBacklog.update_index()
-            time.sleep(2)
+            time.sleep(5)
             app = self.get_app()
 
             with app.test_client() as c:
@@ -541,6 +535,224 @@ class TestProduct(NereidTestCase):
 
                 rv = c.get('/search?q=notdisplay')
                 self.assertNotIn('NotDisplay', rv.data.decode('UTF-8'))
+
+            self.clear_server()
+
+    def test_0035_search(self):
+        """
+        Tests product search via elastic search
+        """
+        with Transaction().start(DB_NAME, USER, context=CONTEXT):
+            self.update_treenode_mapping()
+            self.setup_defaults()
+            self.create_products()
+            self.IndexBacklog.update_index()
+            time.sleep(5)
+            app = self.get_app()
+
+            with app.test_client() as c:
+                rv = c.get('/search?q=product')
+                self.assertTrue(self.template2.name in rv.data.decode('UTF-8'))
+
+                rv = c.get('/search?q=test category')
+                result = rv.data.decode('UTF-8')
+                self.assertTrue(self.template2.name in result)
+                self.assertTrue(self.template3.name in result)
+                self.assertTrue(self.template4.name in result)
+
+                rv = c.get('/search?q=prøduçt 1 ünîçø∂e')
+                self.assertTrue(
+                    self.template1.name in rv.data.decode('UTF-8')
+                )
+
+            self.clear_server()
+
+    def test_0045_product_attributes_indexing(self):
+        """
+        Test that product attributes are being indexed
+        """
+        with Transaction().start(DB_NAME, USER, context=CONTEXT):
+            self.update_treenode_mapping()
+            self.setup_defaults()
+
+            uom, = self.Uom.search([], limit=1)
+
+            # Create attributes
+            attribute1, = self.ProductAttribute.create([{
+                'name': 'size',
+                'type_': 'selection',
+                'string': 'Size',
+                'selection': 'm: M\nl:L\nxl:XL'
+            }])
+            attribute2, = self.ProductAttribute.create([{
+                'name': 'color',
+                'type_': 'selection',
+                'string': 'Color',
+                'selection': 'blue: Blue\nblack:Black'
+            }])
+            attribute3, = self.ProductAttribute.create([{
+                'name': 'attrib',
+                'type_': 'char',
+                'string': 'Attrib',
+            }])
+            attribute4, = self.ProductAttribute.create([{
+                'name': 'ø',
+                'type_': 'char',
+                'string': 'ø',
+            }])
+
+            # Create attribute set
+            attrib_set, = self.ProductAttributeSet.create([{
+                'name': 'Cloth',
+                'attributes': [
+                    ('add', [attribute1.id, attribute2.id, attribute4.id])
+                ]
+            }])
+
+            # Create product template with attribute set
+            template1, = self.ProductTemplate.create([{
+                'name': 'This is Product',
+                'type': 'goods',
+                'list_price': Decimal('10'),
+                'cost_price': Decimal('5'),
+                'default_uom': uom.id,
+                'attribute_set': attrib_set.id,
+            }])
+
+            product1, = self.Product.create([{
+                'template': template1.id,
+                'displayed_on_eshop': True,
+                'uri': 'uri3',
+                'code': 'SomeProductCode',
+                'attributes': {
+                    'color': 'blue',
+                    'size': 'L',
+                    'ø': 'something'
+                }
+            }])
+
+            self.assertEqual(self.IndexBacklog.search([], count=True), 1)
+
+            self.IndexBacklog.update_index()
+            time.sleep(2)
+
+            self.assertEqual(self.IndexBacklog.search([], count=True), 0)
+
+            # Try a simple query on the basis of product attributes.
+            conn = self.ElasticConfig(1).get_es_connection()
+
+            results = [
+                r.name for r in
+                conn.search(
+                    BoolQuery(
+                        should=[
+                            MatchQuery('attributes.color', 'blue')
+                        ]
+                    ),
+                    doc_types=[
+                        self.ElasticConfig(1).make_type_name('product.product')
+                    ],
+                    size=10
+                )
+            ]
+
+            self.assertTrue(product1.name in results)
+
+            self.clear_server()
+
+    def test_0050_faceting(self):
+        """
+        Test that aggregations are being calculated on filterable attributes.
+        """
+        with Transaction().start(DB_NAME, USER, context=CONTEXT):
+            self.update_treenode_mapping()
+            self.setup_defaults()
+
+            uom, = self.Uom.search([], limit=1)
+
+            # Create attributes
+            # By default, `filterable` is True.
+            attribute1, = self.ProductAttribute.create([{
+                'name': 'size',
+                'type_': 'selection',
+                'string': 'Size',
+                'selection': 'm: M\nl:L\nxl:XL'
+            }])
+            attribute2, = self.ProductAttribute.create([{
+                'name': 'color',
+                'type_': 'selection',
+                'string': 'Color',
+                'selection': 'blue: Blue\nblack:Black'
+            }])
+
+            # Create attribute set
+            attrib_set, = self.ProductAttributeSet.create([{
+                'name': 'Cloth',
+                'attributes': [
+                    ('add', [attribute1.id, attribute2.id, ])
+                ]
+            }])
+
+            # Create product template with attribute set
+            template1, = self.ProductTemplate.create([{
+                'name': 'This is Product',
+                'type': 'goods',
+                'list_price': Decimal('10'),
+                'cost_price': Decimal('5'),
+                'default_uom': uom.id,
+                'attribute_set': attrib_set.id,
+            }])
+
+            product1, = self.Product.create([{
+                'template': template1.id,
+                'displayed_on_eshop': True,
+                'uri': 'uri1',
+                'code': 'SomeProductCode1',
+                'attributes': {
+                    'size': 'XL',
+                }
+            }])
+
+            product2, = self.Product.create([{
+                'template': template1.id,
+                'displayed_on_eshop': True,
+                'uri': 'uri2',
+                'code': 'SomeProductCode2',
+                'attributes': {
+                    'color': 'black',
+                    'size': 'L',
+                }
+            }])
+
+            product3, = self.Product.create([{
+                'template': template1.id,
+                'displayed_on_eshop': True,
+                'uri': 'uri3',
+                'code': 'SomeProductCode3',
+                'attributes': {
+                    'color': 'blue',
+                }
+            }])
+
+            self.IndexBacklog.update_index()
+            time.sleep(2)
+
+            resultset = self.Product.search_on_elastic_search('SomeProductCode')
+
+            self.assertEqual(
+                resultset.facets['color']['terms'],
+                [
+                    {'count': 1, 'term': 'blue'},
+                    {'count': 1, 'term': 'black'},
+                ]
+            )
+            self.assertEqual(
+                resultset.facets['size']['terms'],
+                [
+                    {'count': 1, 'term': 'xl'},
+                    {'count': 1, 'term': 'l'},
+                ]
+            )
 
             self.clear_server()
 

@@ -7,9 +7,10 @@
 """
 from trytond.pool import Pool, PoolMeta
 from trytond.transaction import Transaction
+from trytond.model import fields
 from nereid import route, request, render_template
 from nereid.contrib.pagination import Pagination
-from pyes import BoolQuery, MatchQuery
+from pyes import BoolQuery, MatchQuery, NestedQuery
 
 __metaclass__ = PoolMeta
 __all__ = ['Product', 'Template']
@@ -43,6 +44,7 @@ class Product:
                     self.default_uom
                 )
             })
+
         return {
             'id': self.id,
             'name': self.name,
@@ -53,20 +55,57 @@ class Product:
                 'id': self.category.id,
                 'name': self.category.name,
             } if self.category else {},
+            'tree_nodes': [{
+                'id': node.id,
+                'name': node.node.name,
+                'sequence': node.sequence,
+            } for node in self.nodes],
             'type': self.type,
             'price_lists': price_list_data,
-            'tree_nodes': [
-                {
-                    'id': node.id,
-                    'name': node.node.name,
-                    'sequence': node.sequence
-                } for node in self.nodes
-            ],
             'displayed_on_eshop': (
                 "true" if self.displayed_on_eshop else "false"
             ),
             'active': "true" if self.active else "false",
+            'attributes': self.get_elastic_filterable_data(),
         }
+
+    def get_elastic_filterable_data(self):
+        """
+        This method returns a dictionary of attributes which will be used to
+        filter search results. By default, it returns a product's attributes.
+        Downstream modules can override this method to add any other relevant
+        fields. This data is added to the index.
+        """
+        return self.attributes
+
+    @classmethod
+    def get_filterable_attributes(cls):
+        """
+        This method returns a list of filterable product attributes, which can
+        be used in faceting and aggregation. Downstream modules can override
+        this method to add any extra filterable fields.
+        """
+        Attribute = Pool().get('product.attribute')
+
+        return [
+            x.name for x in Attribute.search([('filterable', '=', True)])
+        ]
+
+    @classmethod
+    def add_faceting_to_query(cls, query):
+        """
+        This method wraps the query by a `~pyes.query.Search` object, and then
+        adds appropriate terms to the `facet` attribute of this object. By
+        default, term facets are generated over filterable attributes.
+        """
+        filterable_attributes = cls.get_filterable_attributes()
+
+        search_query = query.search()
+
+        for attribute in filterable_attributes:
+            search_query.facet.add_term_facet(attribute)
+
+        return search_query
 
     @classmethod
     def get_elastic_search_query(cls, search_phrase):
@@ -79,10 +118,10 @@ class Product:
         return BoolQuery(
             should=[
                 MatchQuery(
-                    'code', search_phrase
+                    'code', search_phrase, boost=1.5
                 ),
                 MatchQuery(
-                    'name', search_phrase
+                    'name', search_phrase, boost=2
                 ),
                 MatchQuery(
                     'name.partial', search_phrase
@@ -92,6 +131,19 @@ class Product:
                 ),
                 MatchQuery(
                     'description', search_phrase, boost=0.5
+                ),
+                MatchQuery(
+                    'category.name', search_phrase
+                ),
+                NestedQuery(
+                    'tree_nodes', BoolQuery(
+                        should=[
+                            MatchQuery(
+                                'tree_nodes.name',
+                                search_phrase
+                            ),
+                        ]
+                    )
                 ),
             ],
             must=[
@@ -112,20 +164,39 @@ class Product:
         TODO:
 
             * Add support for sorting
-            * Add support for filtering
             * Add support for aggregates
+
+        This method passes a query, alongwith term facets, to the search method
+        for processing. For example, if one has a `~pyes.query.BoolQuery`
+        object, and the product has attributes 'color' and 'size', one may pass
+        them as terms as follows -:
+
+        >>> query.facet.add_term_facet('color')
+        >>> query.facet.add_term_facet('size')
+
+        The resultset is then obtained and relevant data can be retrieved.
+
+        >>> result_set = conn.search(query, **kwargs)
+        >>> print result_set.facets['color']['terms']
+        [
+            {'count': 1, 'term': 'blue'},
+            {'count': 2, 'term': 'black'},
+            ...
+        ]
 
         :param search_phrase: Searches for this particular phrase
         :param limit: The number of records to be returned
-        :returns: List of dictionaries which contain each product's attributes
+        :returns: `~pyes.es.ResultSet` object which contains each product's
+        attributes
         """
         config = Pool().get('elasticsearch.configuration')(1)
 
         conn = config.get_es_connection(timeout=5)
         query = cls.get_elastic_search_query(search_phrase)
+        faceted_query = cls.add_faceting_to_query(query)
 
         return conn.search(
-            query,
+            faceted_query,
             doc_types=[config.make_type_name('product.product')],
             size=limit
         )
@@ -142,9 +213,11 @@ class Product:
 
         logger = Pool().get('elasticsearch.configuration').get_logger()
 
+        result_set = cls.search_on_elastic_search(phrase)
+
         results = [
             r.id for r in
-            cls.search_on_elastic_search(phrase)
+            result_set
         ]
 
         if not results:
@@ -211,3 +284,12 @@ class Template:
             products.extend([Product(p) for p in template.products])
         IndexBacklog.create_from_records(products)
         return rv
+
+
+class ProductAttribute:
+    __name__ = 'product.attribute'
+    filterable = fields.Boolean('Filterable')
+
+    @staticmethod
+    def default_filterable():
+        return True
