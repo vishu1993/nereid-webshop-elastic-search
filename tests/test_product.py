@@ -660,6 +660,102 @@ class TestProduct(NereidTestCase):
 
             self.clear_server()
 
+    def test_0050_faceting(self):
+        """
+        Test that aggregations are being calculated on filterable attributes.
+        """
+        with Transaction().start(DB_NAME, USER, context=CONTEXT):
+            self.update_treenode_mapping()
+            self.setup_defaults()
+
+            uom, = self.Uom.search([], limit=1)
+
+            # Create attributes
+            # By default, `filterable` is True.
+            attribute1, = self.ProductAttribute.create([{
+                'name': 'size',
+                'type_': 'selection',
+                'string': 'Size',
+                'selection': 'm: M\nl:L\nxl:XL'
+            }])
+            attribute2, = self.ProductAttribute.create([{
+                'name': 'color',
+                'type_': 'selection',
+                'string': 'Color',
+                'selection': 'blue: Blue\nblack:Black'
+            }])
+
+            # Create attribute set
+            attrib_set, = self.ProductAttributeSet.create([{
+                'name': 'Cloth',
+                'attributes': [
+                    ('add', [attribute1.id, attribute2.id, ])
+                ]
+            }])
+
+            # Create product template with attribute set
+            template1, = self.ProductTemplate.create([{
+                'name': 'This is Product',
+                'type': 'goods',
+                'list_price': Decimal('10'),
+                'cost_price': Decimal('5'),
+                'default_uom': uom.id,
+                'attribute_set': attrib_set.id,
+            }])
+
+            product1, = self.Product.create([{
+                'template': template1.id,
+                'displayed_on_eshop': True,
+                'uri': 'uri1',
+                'code': 'SomeProductCode1',
+                'attributes': {
+                    'size': 'XL',
+                }
+            }])
+
+            product2, = self.Product.create([{
+                'template': template1.id,
+                'displayed_on_eshop': True,
+                'uri': 'uri2',
+                'code': 'SomeProductCode2',
+                'attributes': {
+                    'color': 'black',
+                    'size': 'L',
+                }
+            }])
+
+            product3, = self.Product.create([{
+                'template': template1.id,
+                'displayed_on_eshop': True,
+                'uri': 'uri3',
+                'code': 'SomeProductCode3',
+                'attributes': {
+                    'color': 'blue',
+                }
+            }])
+
+            self.IndexBacklog.update_index()
+            time.sleep(2)
+
+            resultset = self.Product.search_on_elastic_search('SomeProductCode')
+
+            self.assertEqual(
+                resultset.facets['color']['terms'],
+                [
+                    {'count': 1, 'term': 'blue'},
+                    {'count': 1, 'term': 'black'},
+                ]
+            )
+            self.assertEqual(
+                resultset.facets['size']['terms'],
+                [
+                    {'count': 1, 'term': 'xl'},
+                    {'count': 1, 'term': 'l'},
+                ]
+            )
+
+            self.clear_server()
+
 
 def suite():
     """
