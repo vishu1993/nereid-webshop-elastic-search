@@ -2,7 +2,7 @@
 """
     tests/test_product.py
 
-    :copyright: (c) 2014 by Openlabs Technologies & Consulting (P) Limited
+    :copyright: (c) 2014-2015 by Openlabs Technologies & Consulting (P) Limited
     :license: BSD, see LICENSE for more details.
 """
 import unittest
@@ -66,6 +66,7 @@ class TestProduct(NereidTestCase):
             'search-results.jinja': '''
                 {% for product in products %}
                 {{ product.name }}
+                {{ product.code }}
                 {% endfor %}
             ''',
         }
@@ -673,7 +674,6 @@ class TestProduct(NereidTestCase):
 
             self.clear_server()
 
-    @unittest.skip("Skipping for now.")
     def test_0050_faceting(self):
         """
         Test that aggregations are being calculated on filterable attributes.
@@ -681,6 +681,7 @@ class TestProduct(NereidTestCase):
         with Transaction().start(DB_NAME, USER, context=CONTEXT):
             self.update_treenode_mapping()
             self.setup_defaults()
+            app = self.get_app()
 
             uom, = self.Uom.search([], limit=1)
 
@@ -751,24 +752,188 @@ class TestProduct(NereidTestCase):
             self.IndexBacklog.update_index()
             time.sleep(2)
 
-            resultset = self.Product.search_on_elastic_search('SomeProductCode')
+            with app.test_request_context('/search?q=SomeProductCode'):
+                facets = self.NereidWebsite.quick_search().context['facets']
+                facets = self.Product.add_display_counts(facets)
 
-            self.assertEqual(
-                resultset.facets['color']['terms'],
-                [
-                    {'count': 1, 'term': 'blue'},
-                    {'count': 1, 'term': 'black'},
-                ]
-            )
-            self.assertEqual(
-                resultset.facets['size']['terms'],
-                [
-                    {'count': 1, 'term': 'xl'},
-                    {'count': 1, 'term': 'l'},
-                ]
-            )
+                self.assertGreater(
+                    len(facets['color']['terms']), 0
+                )
+                self.assertIn('display_count', facets['color'])
+
+                self.assertGreater(
+                    len(facets['size']['terms']), 0
+                )
+                self.assertIn('display_count', facets['size'])
 
             self.clear_server()
+
+    def test_0055_filtering(self):
+        """
+        Test whether filtering works.
+        """
+        with Transaction().start(DB_NAME, USER, context=CONTEXT):
+            self.update_treenode_mapping()
+            self.setup_defaults()
+            app = self.get_app()
+
+            uom, = self.Uom.search([], limit=1)
+
+            # Create attributes
+            # By default, `filterable` is True.
+            attribute1, = self.ProductAttribute.create([{
+                'name': 'size',
+                'type_': 'selection',
+                'string': 'Size',
+                'selection': 'm: M\nl:L\nxl:XL'
+            }])
+            attribute2, = self.ProductAttribute.create([{
+                'name': 'color',
+                'type_': 'selection',
+                'string': 'Color',
+                'selection': 'blue: Blue\nblack:Black'
+            }])
+            attribute3, = self.ProductAttribute.create([{
+                'name': 'medium',
+                'type_': 'selection',
+                'string': 'Medium',
+                'selection': 'digital: Digital\nphysical:Physical'
+            }])
+
+            # Create attribute set
+            attrib_set, = self.ProductAttributeSet.create([{
+                'name': 'Cloth',
+                'attributes': [
+                    ('add', [attribute1.id, attribute2.id, attribute3.id])
+                ]
+            }])
+
+            # Create product template with attribute set
+            template1, = self.ProductTemplate.create([{
+                'name': 'This is Product',
+                'type': 'goods',
+                'list_price': Decimal('10'),
+                'cost_price': Decimal('5'),
+                'default_uom': uom.id,
+                'attribute_set': attrib_set.id,
+            }])
+
+            product1, = self.Product.create([{
+                'template': template1.id,
+                'displayed_on_eshop': True,
+                'uri': 'uri1',
+                'code': 'SomeProductCode1',
+                'attributes': {
+                    'size': 'XL',
+                    'medium': 'digital',
+                }
+            }])
+
+            product2, = self.Product.create([{
+                'template': template1.id,
+                'displayed_on_eshop': True,
+                'uri': 'uri2',
+                'code': 'SomeProductCode2',
+                'attributes': {
+                    'color': 'black',
+                    'size': 'L',
+                    'medium': 'digital',
+                }
+            }])
+
+            product3, = self.Product.create([{
+                'template': template1.id,
+                'displayed_on_eshop': True,
+                'uri': 'uri3',
+                'code': 'SomeProductCode3',
+                'attributes': {
+                    'color': 'blue',
+                    'medium': 'physical',
+                }
+            }])
+
+            self.IndexBacklog.update_index()
+            time.sleep(2)
+
+            with app.test_client() as c:
+                # No result search
+                rv = c.get('/search?q=NotHere&color=black&size=xl')
+                self.assertEqual(rv.data.strip(), '')
+
+                # Color should be black
+                rv = c.get('/search?q=product&color=black')
+                self.assertTrue(product2.code in rv.data)
+                self.assertFalse(product3.code in rv.data)
+
+                # Color could be blue or black
+                rv = c.get('/search?q=product&color=blue&color=black')
+                self.assertTrue(product2.code in rv.data)
+                self.assertTrue(product3.code in rv.data)
+
+                # Color should be blue or black and the medium should be
+                # physical
+                rv = c.get(
+                    '/search?q=product&color=blue&color=black&medium=physical'
+                )
+                self.assertTrue(product3.code in rv.data)
+                self.assertFalse(product1.code in rv.data)
+                self.assertFalse(product2.code in rv.data)
+
+                # Medium should be digital
+                rv = c.get('/search?q=product&medium=digital')
+                self.assertTrue(product1.code in rv.data)
+                self.assertTrue(product2.code in rv.data)
+
+            # Now test that the facet tallies get updated due to filtering.
+            # First, no filtering case.
+            with app.test_request_context('/search?q=product'):
+                facets = self.NereidWebsite.quick_search().context['facets']
+                self.assertItemsEqual(
+                    facets['color']['terms'],
+                    [
+                        {'count': 1, 'term': 'blue'},
+                        {'count': 1, 'term': 'black'}
+                    ]
+                )
+                self.assertItemsEqual(
+                    facets['medium']['terms'],
+                    [
+                        {'count': 2, 'term': 'digital'},
+                        {'count': 1, 'term': 'physical'}
+                    ]
+                )
+                self.assertItemsEqual(
+                    facets['size']['terms'],
+                    [
+                        {'count': 1, 'term': 'xl'},
+                        {'count': 1, 'term': 'l'},
+                    ]
+                )
+
+            # Apply a filter.
+            with app.test_request_context('/search?q=product&color=black'):
+                facets = self.NereidWebsite.quick_search().context['facets']
+                self.assertItemsEqual(
+                    facets['color']['terms'],
+                    [
+                        {'count': 1, 'term': 'black'},
+                        {'count': 0, 'term': 'blue'},
+                    ]
+                )
+                self.assertItemsEqual(
+                    facets['medium']['terms'],
+                    [
+                        {'count': 1, 'term': 'digital'},
+                        {'count': 0, 'term': 'physical'},
+                    ]
+                )
+                self.assertItemsEqual(
+                    facets['size']['terms'],
+                    [
+                        {'count': 1, 'term': 'l'},
+                        {'count': 0, 'term': 'xl'},
+                    ]
+                )
 
 
 def suite():

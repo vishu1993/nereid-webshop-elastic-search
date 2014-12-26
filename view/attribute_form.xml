@@ -3,5 +3,18 @@
     <xpath expr="/form/field[@name='type_']" position="after">
         <label name="filterable"/>
         <field name="filterable"/>
+        <newline />
+        <separator string="Additional Settings" id="settings" colspan="4"
+            states="{'invisible': ~Bool(Eval('filterable'))}"/>
+        <group col="4" colspan="4" id="on_filter">
+            <label name="display_count"/>
+            <field name="display_count"/>
+            <label name="multiselect"/>
+            <field name="multiselect"/>
+            <label name="display_size"/>
+            <field name="display_size"/>
+            <label name="display_order"/>
+            <field name="display_order"/>
+        </group>
     </xpath>
 </data>
