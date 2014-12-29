@@ -7,6 +7,8 @@
 
 '''
 from trytond.pool import Pool, PoolMeta
+from nereid import request, route, render_template
+from pagination import ElasticPagination
 
 __metaclass__ = PoolMeta
 __all__ = ['Website']
@@ -17,11 +19,45 @@ class Website:
     __name__ = 'nereid.website'
 
     @classmethod
-    def auto_complete(cls, phrase, limit=10):
+    def auto_complete(cls, phrase):
         """
         This is a downstream implementation which uses elasticsearch to return
         results for a query.
         """
         Product = Pool().get('product.product')
 
-        return Product.elasticsearch_auto_complete(phrase, limit)
+        return Product.elasticsearch_auto_complete(phrase)
+
+    @classmethod
+    @route('/search')
+    def quick_search(cls):
+        """
+        This version of quick_search uses elasticsearch to build
+        search results for searches from the website.
+        """
+        Product = Pool().get('product.product')
+
+        page = request.args.get('page', 1, type=int)
+        phrase = request.args.get('q', '')
+
+        logger = Pool().get('elasticsearch.configuration').get_logger()
+
+        search_obj = Product.search_on_elastic_search(phrase)
+
+        products = ElasticPagination(
+            Product.__name__, search_obj, page, Product.per_page
+        )
+
+        if not products:
+            logger.info(
+                "Search for %s yielded no results from elasticsearch." % phrase
+            )
+            logger.info("Falling back to parent quick_search.")
+            return super(Website, cls).quick_search()
+
+        logger.info(
+            "Search for %s yielded in %d results." %
+            (phrase, products.count)
+        )
+
+        return render_template('search-results.jinja', products=products)

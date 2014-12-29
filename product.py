@@ -8,8 +8,6 @@
 from trytond.pool import Pool, PoolMeta
 from trytond.transaction import Transaction
 from trytond.model import fields
-from nereid import route, request, render_template
-from nereid.contrib.pagination import Pagination
 from pyes import BoolQuery, MatchQuery, NestedQuery
 
 __metaclass__ = PoolMeta
@@ -87,25 +85,23 @@ class Product:
         """
         Attribute = Pool().get('product.attribute')
 
-        return [
-            x.name for x in Attribute.search([('filterable', '=', True)])
-        ]
+        return Attribute.search([('filterable', '=', True)])
 
     @classmethod
-    def add_faceting_to_query(cls, query):
+    def add_faceting_to_query(cls, search_obj):
         """
         This method wraps the query by a `~pyes.query.Search` object, and then
         adds appropriate terms to the `facet` attribute of this object. By
         default, term facets are generated over filterable attributes.
         """
-        filterable_attributes = cls.get_filterable_attributes()
-
-        search_query = query.search()
+        filterable_attributes = map(
+            lambda x: x.name, cls.get_filterable_attributes()
+        )
 
         for attribute in filterable_attributes:
-            search_query.facet.add_term_facet(attribute)
+            search_obj.facet.add_term_facet(attribute)
 
-        return search_query
+        return search_obj
 
     @classmethod
     def get_elastic_search_query(cls, search_phrase):
@@ -157,7 +153,9 @@ class Product:
         )
 
     @classmethod
-    def search_on_elastic_search(cls, search_phrase, limit=100):
+    def search_on_elastic_search(
+        cls, search_phrase, autocomplete=False
+    ):
         """
         Searches on elasticsearch server for given search phrase.
 
@@ -189,62 +187,37 @@ class Product:
         :returns: `~pyes.es.ResultSet` object which contains each product's
         attributes
         """
-        config = Pool().get('elasticsearch.configuration')(1)
-
-        conn = config.get_es_connection(timeout=5)
+        # Build the query object
         query = cls.get_elastic_search_query(search_phrase)
-        faceted_query = cls.add_faceting_to_query(query)
 
-        return conn.search(
-            faceted_query,
-            doc_types=[config.make_type_name('product.product')],
-            size=limit
-        )
+        # Wrap it in a `~pyes.query.Search` object for convenience, by calling
+        # its search() method.
+        search_obj = query.search()
 
-    @classmethod
-    @route('/search')
-    def quick_search(cls):
-        """
-        This version of quick_search uses elasticsearch to build
-        search results for searches from the website.
-        """
-        page = request.args.get('page', 1, type=int)
-        phrase = request.args.get('q', '')
+        # If the autocomplete handler wasn't the one to send a request,
+        # faceting can be done.
+        if not autocomplete:
+            search_obj = cls.add_faceting_to_query(search_obj)
 
-        logger = Pool().get('elasticsearch.configuration').get_logger()
-
-        result_set = cls.search_on_elastic_search(phrase)
-
-        results = [
-            r.id for r in
-            result_set
-        ]
-
-        if not results:
-            logger.info(
-                "Search for %s yielded no results from elasticsearch." % phrase
-            )
-            logger.info("Falling back to parent quick_search.")
-            return super(Product, cls).quick_search()
-
-        logger.info(
-            "Search for %s yielded in %d results." %
-            (phrase, len(results))
-        )
-
-        products = Pagination(cls, [
-            ('id', 'in', results),
-        ], page, cls.per_page)
-
-        return render_template('search-results.jinja', products=products)
+        return search_obj
 
     @classmethod
-    def elasticsearch_auto_complete(cls, phrase, limit=10):
+    def elasticsearch_auto_complete(cls, phrase):
         """
         Handler for auto-completion via elastic-search.
         """
+        config = Pool().get('elasticsearch.configuration')(1)
+
+        conn = config.get_es_connection(timeout=5)
         results = []
-        for product in cls.search_on_elastic_search(phrase, limit=limit):
+
+        search_obj = cls.search_on_elastic_search(phrase, autocomplete=True)
+
+        for product in conn.search(
+            search_obj,
+            doc_types=[config.make_type_name('product.product')],
+            size=5
+        ):
             results.append({"value": product.name})
 
         return results
