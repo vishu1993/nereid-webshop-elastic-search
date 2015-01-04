@@ -501,13 +501,26 @@ class TestProduct(NereidTestCase):
             self.update_treenode_mapping()
             self.setup_defaults()
             self.create_products()
+            app = self.get_app()
+
             self.IndexBacklog.update_index()
             time.sleep(5)
 
-            results = self.NereidWebsite.auto_complete('product')
+            with app.test_request_context('/'):
+                results = self.NereidWebsite.auto_complete('product')
 
-            self.assertIn({'value': self.template1.name}, results)
-            self.assertIn({'value': self.template2.name}, results)
+                self.assertIn({
+                    'display_name': self.template1.name,
+                    'url': self.template1.products[0].get_absolute_url(
+                        _external=True
+                    ),
+                }, results)
+                self.assertIn({
+                    'display_name': self.template2.name,
+                    'url': self.template2.products[0].get_absolute_url(
+                        _external=True
+                    ),
+                }, results)
 
             self.clear_server()
 
