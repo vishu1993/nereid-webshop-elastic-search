@@ -205,6 +205,9 @@ class Product:
     def elasticsearch_auto_complete(cls, phrase):
         """
         Handler for auto-completion via elastic-search.
+        The product's URL is generated here as request context is available
+        here. This is sent to the front-end for typeaheadJS to compile into
+        its suggestions template.
         """
         config = Pool().get('elasticsearch.configuration')(1)
 
@@ -218,7 +221,14 @@ class Product:
             doc_types=[config.make_type_name('product.product')],
             size=5
         ):
-            results.append({"value": product.name})
+            results.append(
+                {
+                    "display_name": product.name,
+                    "url": cls(product.id).get_absolute_url(
+                        _external=True
+                    ),
+                }
+            )
 
         return results
 
