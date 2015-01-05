@@ -11,6 +11,7 @@ import trytond.tests.test_tryton
 
 from tests.test_views_depends import TestViewsDepends
 from tests.test_product import TestProduct
+from tests.test_pagination import TestPagination
 
 
 def suite():
@@ -21,6 +22,7 @@ def suite():
     test_suite.addTests([
         unittest.TestLoader().loadTestsFromTestCase(TestViewsDepends),
         unittest.TestLoader().loadTestsFromTestCase(TestProduct),
+        unittest.TestLoader().loadTestsFromTestCase(TestPagination),
     ])
     return test_suite
 
