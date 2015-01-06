@@ -2,7 +2,7 @@
 """
     tests/test_pagination.py
 
-    :copyright: (c) 2014 by Openlabs Technologies & Consulting (P) Limited
+    :copyright: (c) 2014-2015 by Openlabs Technologies & Consulting (P) Limited
     :license: BSD, see LICENSE for more details.
 """
 import time
@@ -358,7 +358,7 @@ class TestPagination(NereidTestCase):
 
             self.assertEqual(self.IndexBacklog.search([], count=True), 0)
 
-            search_obj = self.Product.search_on_elastic_search('GreatProduct')
+            search_obj = self.Product._quick_search_es('GreatProduct')
 
             pagination = ElasticPagination(
                 self.Product.__name__, search_obj, page=1, per_page=10

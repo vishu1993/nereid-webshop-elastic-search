@@ -2,7 +2,7 @@
 '''
     website
 
-    :copyright: (c) 2014 by Openlabs Technologies & Consulting (P) Ltd.
+    :copyright: (c) 2014-2015 by Openlabs Technologies & Consulting (P) Ltd.
     :license: GPLv3, see LICENSE for more details
 
 '''
@@ -26,7 +26,7 @@ class Website:
         """
         Product = Pool().get('product.product')
 
-        return Product.elasticsearch_auto_complete(phrase)
+        return Product._es_autocomplete(phrase)
 
     @classmethod
     @route('/search')
@@ -42,7 +42,7 @@ class Website:
 
         logger = Pool().get('elasticsearch.configuration').get_logger()
 
-        search_obj = Product.search_on_elastic_search(phrase)
+        search_obj = Product._quick_search_es(phrase)
 
         products = ElasticPagination(
             Product.__name__, search_obj, page, Product.per_page
@@ -60,4 +60,8 @@ class Website:
             (phrase, products.count)
         )
 
-        return render_template('search-results.jinja', products=products)
+        return render_template(
+            'search-results.jinja',
+            products=products,
+            facets=products.result_set.facets
+        )
