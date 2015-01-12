@@ -48,17 +48,15 @@ class Website:
             Product.__name__, search_obj, page, Product.per_page
         )
 
-        if not products:
+        if products:
+            logger.info(
+                "Search for %s yielded in %d results." %
+                (phrase, products.count)
+            )
+        else:
             logger.info(
                 "Search for %s yielded no results from elasticsearch." % phrase
             )
-            logger.info("Falling back to parent quick_search.")
-            return super(Website, cls).quick_search()
-
-        logger.info(
-            "Search for %s yielded in %d results." %
-            (phrase, products.count)
-        )
 
         return render_template(
             'search-results.jinja',
