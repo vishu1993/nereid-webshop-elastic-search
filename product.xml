@@ -17,6 +17,18 @@
             <field name="model" search="[('model', '=', 'product.product')]"/>
             <field name="mapping">
               {
+                  "dynamic_templates": [
+                      {
+                          "string_template": {
+                              "path_match": "attributes.*",
+                              "match_mapping_type": "string",
+                              "mapping": {
+                                  "type": "string",
+                                  "index": "not_analyzed"
+                              }
+                          }
+                      }
+                  ],
                   "properties": {
                       "code": {
                           "type": "string",
