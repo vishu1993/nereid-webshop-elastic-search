@@ -905,8 +905,8 @@ class TestProduct(NereidTestCase):
                 self.assertItemsEqual(
                     facets['size']['terms'],
                     [
-                        {'count': 1, 'term': 'xl'},
-                        {'count': 1, 'term': 'l'},
+                        {'count': 1, 'term': 'XL'},
+                        {'count': 1, 'term': 'L'},
                     ]
                 )
 
@@ -930,8 +930,8 @@ class TestProduct(NereidTestCase):
                 self.assertItemsEqual(
                     facets['size']['terms'],
                     [
-                        {'count': 1, 'term': 'l'},
-                        {'count': 0, 'term': 'xl'},
+                        {'count': 1, 'term': 'L'},
+                        {'count': 0, 'term': 'XL'},
                     ]
                 )
 
