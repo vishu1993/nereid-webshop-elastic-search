@@ -1,2 +1,0 @@
-nereid-webshop-elastic-search
-=============================
